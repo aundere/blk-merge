@@ -1,49 +1,69 @@
 use nom::{branch::alt, bytes::complete::{tag, take_until}, character::complete::{alpha1, char, digit1, multispace0}, combinator::recognize, multi::{many0, many1}, sequence::{delimited, terminated}, IResult, Parser};
+use crate::types::*;
 
-/// Represents the possible values a property can have in a BLK configuration.
-#[derive(Debug, PartialEq)]
-pub enum BlkPropertyValue {
-    Text(String),
-    Boolean(bool),
-    Integer(i32),
-    Real(f32),
-    Vector2(f32, f32),
-    Vector3(f32, f32, f32),
-    Vector4(f32, f32, f32, f32),
-    Color(i32, i32, i32, i32)
+/// Represents the different types of BLK properties.
+enum BlkType { Text, Boolean, Integer, Real, Point2, Point3, Point4, Color }
+
+/// Parses a BLK type identifier from the input string.
+fn parse_blk_type(input: &str) -> IResult<&str, BlkType> {
+    alt((
+        tag("t").map(|_| BlkType::Text),
+        tag("b").map(|_| BlkType::Boolean),
+        tag("i").map(|_| BlkType::Integer),
+        tag("r").map(|_| BlkType::Real),
+        tag("p2").map(|_| BlkType::Point2),
+        tag("p3").map(|_| BlkType::Point3),
+        tag("p4").map(|_| BlkType::Point4),
+        tag("c").map(|_| BlkType::Color)
+    )).parse(input)
 }
 
-/// Represents a property in a BLK configuration.
-#[derive(Debug, PartialEq)]
-pub struct BlkProperty {
-    pub key: String,
-    pub value: BlkPropertyValue
-}
-
-/// Represents a section in a BLK configuration.
-#[derive(Debug, PartialEq)]
-pub struct BlkSection {
-    pub name: String,
-    pub entries: Vec<BlkEntry>
-}
-
-/// Represents an entry in a BLK configuration, which can be either a section or a property.
-#[derive(Debug, PartialEq)]
-pub enum BlkEntry {
-    Section(BlkSection),
-    Property(BlkProperty)
-}
-
-/// Represents a block in a BLK configuration.
-#[derive(Debug, PartialEq)]
-pub struct BlkBlock {
-    pub entries: Vec<BlkEntry>
-}
-
-/// Represents a BLK configuration, which consists of multiple entries.
-#[derive(Debug, PartialEq)]
-pub struct BlkConfig {
-    pub block: BlkBlock
+/// Parses a BLK property value based on its type.
+fn parse_property_value(ty: BlkType) -> impl Fn(&str) -> IResult<&str, BlkPropertyValue> {
+    move |input: &str| {
+        match ty {
+            BlkType::Text => parse_string
+                .map(|text| BlkPropertyValue::Text(text.to_string()))
+                .parse(input),
+            BlkType::Boolean => parse_boolean
+                .map(BlkPropertyValue::Boolean)
+                .parse(input),
+            BlkType::Integer => parse_integer
+                .map(BlkPropertyValue::Integer)
+                .parse(input),
+            BlkType::Real => parse_real
+                .map(BlkPropertyValue::Real)
+                .parse(input),
+            BlkType::Point2 => {
+                let (rest, (x, _, y)) =
+                    (parse_real, parse_vector_delimiter, parse_real).parse(input)?;
+                Ok((rest, BlkPropertyValue::Vector2(x, y)))
+            }
+            BlkType::Point3 => {
+                let (rest, (x, y, z)) =
+                    (terminated(parse_real, parse_vector_delimiter), terminated(parse_real, parse_vector_delimiter), parse_real).parse(input)?;
+                Ok((rest, BlkPropertyValue::Vector3(x, y, z)))
+            }
+            BlkType::Point4 => {
+                let (rest, (x, y, z, w)) = (
+                    terminated(parse_real, parse_vector_delimiter),
+                    terminated(parse_real, parse_vector_delimiter),
+                    terminated(parse_real, parse_vector_delimiter),
+                    parse_real
+                ).parse(input)?;
+                Ok((rest, BlkPropertyValue::Vector4(x, y, z, w)))
+            }
+            BlkType::Color => {
+                let (rest, (r, g, b, a)) = (
+                    terminated(parse_integer, parse_vector_delimiter),
+                    terminated(parse_integer, parse_vector_delimiter),
+                    terminated(parse_integer, parse_vector_delimiter),
+                    parse_integer
+                ).parse(input)?;
+                Ok((rest, BlkPropertyValue::Color(r, g, b, a)))
+            }
+        }
+    }
 }
 
 /// Parses a newline character, supporting both Unix and Windows formats.
@@ -89,66 +109,10 @@ fn parse_string(input: &str) -> IResult<&str, &str> {
     delimited(char('"'), take_until("\""), char('"')).parse(input)
 }
 
-/// Parses a BLK property with a text value from the input string.
-fn parse_property_text(input: &str) -> IResult<&str, BlkPropertyValue> {
-    let (remaining, (_, text)) = (tag("t="), parse_string).parse(input)?;
-    Ok((remaining, BlkPropertyValue::Text(text.to_string())))
-}
-
-/// Parses a BLK property with an integer value from the input string.
-fn parse_property_integer(input: &str) -> IResult<&str, BlkPropertyValue> {
-    let (remaining, (_, value)) = (tag("i="), parse_integer).parse(input)?;
-    Ok((remaining, BlkPropertyValue::Integer(value)))
-}
-
-/// Parses a BLK property with a real (floating-point) value from the input string.
-fn parse_property_real(input: &str) -> IResult<&str, BlkPropertyValue> {
-    let (remaining, (_, value)) = (tag("r="), parse_real).parse(input)?;
-    Ok((remaining, BlkPropertyValue::Real(value)))
-}
-
-/// Parses a BLK property with a boolean value from the input string.
-fn parse_property_boolean(input: &str) -> IResult<&str, BlkPropertyValue> {
-    let (remaining, (_, value)) = (tag("b="), parse_boolean).parse(input)?;
-    Ok((remaining, BlkPropertyValue::Boolean(value)))
-}
-
-/// Parses a BLK property with a 2D vector value from the input string.
-fn parse_property_vector2(input: &str) -> IResult<&str, BlkPropertyValue> {
-    let (remaining, (_, x, _, y)) = (tag("p2="), parse_real, parse_vector_delimiter, parse_real).parse(input)?;
-    Ok((remaining, BlkPropertyValue::Vector2(x, y)))
-}
-
-/// Parses a BLK property with a 3D vector value from the input string.
-fn parse_property_vector3(input: &str) -> IResult<&str, BlkPropertyValue> {
-    let (remaining, (_, x, _, y, _, z)) = (tag("p3="), parse_real, parse_vector_delimiter, parse_real, parse_vector_delimiter, parse_real).parse(input)?;
-    Ok((remaining, BlkPropertyValue::Vector3(x, y, z)))
-}
-
-/// Parses a BLK property with a 4D vector value from the input string.
-fn parse_property_vector4(input: &str) -> IResult<&str, BlkPropertyValue> {
-    let (remaining, (_, x, _, y, _, z, _, w)) = (tag("p4="), parse_real, parse_vector_delimiter, parse_real, parse_vector_delimiter, parse_real, parse_vector_delimiter, parse_real).parse(input)?;
-    Ok((remaining, BlkPropertyValue::Vector4(x, y, z, w)))
-}
-
-/// Parses a BLK property with a RGBA color value from the input string.
-fn parse_property_color(input: &str) -> IResult<&str, BlkPropertyValue> {
-    let (remaining, (_, r, _, g, _, b, _, a)) = (tag("c="), parse_integer, parse_vector_delimiter, parse_integer, parse_vector_delimiter, parse_integer, parse_vector_delimiter, parse_integer).parse(input)?;
-    Ok((remaining, BlkPropertyValue::Color(r, g, b, a)))
-}
-
 /// Parses a BLK property from the input string.
 fn parse_property(input: &str) -> IResult<&str, BlkEntry> {
-    let (remaining, (identifier, _, value)) = (parse_identifier, char(':'), alt((
-        parse_property_text,
-        parse_property_integer,
-        parse_property_real,
-        parse_property_boolean,
-        parse_property_vector2,
-        parse_property_vector3,
-        parse_property_vector4,
-        parse_property_color
-    ))).parse(input)?;
+    let (remaining, (identifier, ty)) = (parse_identifier, delimited(char(':'), parse_blk_type, char('='))).parse(input)?;
+    let (remaining, value) = parse_property_value(ty).parse(remaining)?;
 
     Ok((remaining, BlkEntry::Property(BlkProperty { key: identifier.to_string(), value })))
 }
@@ -210,6 +174,37 @@ mod tests {
         } else {
             panic!("Expected a property entry");
         }
+    }
+
+    #[test]
+    fn test_parse_with_crlf() {
+        let input = "meow:t=\"uwu\";\r\nuwu{owo:i=32;};";
+        let result = parse_config(input);
+
+        assert!(result.is_ok());
+
+        let (remaining, config) = result.unwrap();
+
+        assert_eq!(remaining, "");
+        assert_eq!(config, BlkConfig {
+            block: BlkBlock {
+                entries: vec![
+                    BlkEntry::Property(BlkProperty {
+                        key: "meow".to_string(),
+                        value: BlkPropertyValue::Text("uwu".to_string())
+                    }),
+                    BlkEntry::Section(BlkSection {
+                        name: "uwu".to_string(),
+                        entries: vec![
+                            BlkEntry::Property(BlkProperty {
+                                key: "owo".to_string(),
+                                value: BlkPropertyValue::Integer(32)
+                            })
+                        ]
+                    })
+                ]
+            }
+        })
     }
 
     #[test]

@@ -1,4 +1,5 @@
 mod parser;
+mod types;
 
 fn main() {
     let file_name = std::env::args().nth(1)
