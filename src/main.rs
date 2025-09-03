@@ -1,38 +1,64 @@
-use std::io::stdout;
+use std::fs::File;
 
-use crate::types::stringify_config;
+use clap::Parser;
+
+use crate::types::{stringify_config, BlkConfig};
 
 mod parser;
 mod types;
 
+/// Command line arguments
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Input file name
+    #[arg(short, long)]
+    file: String,
+
+    /// Second file to merge with
+    #[arg(short, long)]
+    with: String,
+
+    /// Output file name. Will be used instead of rewriting the first file
+    #[arg(short, long)]
+    output: Option<String>,
+
+    /// Dry run mode
+    #[arg(short, long)]
+    dry_run: bool,
+
+    /// Use a merging policy file
+    #[arg(short = 'p', long)]
+    use_policy: Option<String>,
+}
+
+/// Reads a file and parses it into a BlkConfig
+fn read_and_parse(filename: &str) -> BlkConfig {
+    let content = std::fs::read_to_string(filename)
+        .expect("Failed to read file");
+
+    parser::parse_config(&content)
+        .expect("Failed to parse config").1
+}
+
+/// Main function
 fn main() {
-    let file_name = std::env::args().nth(1)
-        .expect("Please provide a file name as the first argument");
+    let args = Args::parse();
 
-    let output_file_name = std::env::args().nth(2)
-        .expect("Please provide an output file name as the second argument");
+    let first_config = read_and_parse(&args.file);
+    let second_config = read_and_parse(&args.with);
 
-    let file = std::fs::read(file_name)
-        .expect("Unable to read the file");
+    // TODO: merge two configs
 
-    let output_file = std::fs::File::create(output_file_name)
-        .expect("Unable to create the output file");
-    let mut output_stream = std::io::BufWriter::new(output_file);
+    let merged_config = first_config; // Placeholder for merged config
 
-    let content = String::from_utf8(file)
-        .expect("Unable to convert file to string");
+    if !args.dry_run {
+        let output_file_name = args.output.unwrap_or_else(|| args.file);
 
-    let result = parser::parse_config(&content);
+        let mut output_file = File::create(&output_file_name)
+            .expect("Failed to create output file");
 
-    match result {
-        Ok((remaining, config)) => {
-            stringify_config(&config, &mut stdout()).expect("Failed to write output");
-            stringify_config(&config, &mut output_stream).expect("Failed to write output");
-
-            if !remaining.is_empty() {
-                println!("Warning: Unparsed content remaining: {}", remaining);
-            }
-        }
-        Err(err) => eprintln!("Failed to parse config: {:?}", err),
+        stringify_config(&merged_config, &mut output_file)
+            .expect("Failed to write output");
     }
 }
