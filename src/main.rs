@@ -4,7 +4,7 @@ use clap::Parser;
 
 use crate::types::{stringify_config, BlkConfig};
 
-mod parser;
+mod parsers;
 mod types;
 
 /// Command line arguments
@@ -37,7 +37,7 @@ fn read_and_parse(filename: &str) -> BlkConfig {
     let content = std::fs::read_to_string(filename)
         .expect("Failed to read file");
 
-    parser::parse_config(&content)
+    parsers::blk::parse_config(&content)
         .expect("Failed to parse config").1
 }
 
